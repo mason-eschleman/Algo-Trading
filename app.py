@@ -6,7 +6,7 @@ from lightweight_charts import Chart
 
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
-from ibapi.client import Contract, Order, ScannerSubscription
+from ibapi.client import Contract, Order
 from ibapi.tag_value import TagValue
 
 # create a queue for data coming from Interactive Brokers API
@@ -16,7 +16,7 @@ data_queue = queue.Queue()
 current_lines = []
 
 # initial chart symbol to show
-INITIAL_SYMBOL = "TSM"
+INITIAL_SYMBOL = "AAPL"
 
 # settings for live trading vs. paper trading mode
 LIVE_TRADING = False
@@ -26,12 +26,12 @@ TRADING_PORT = PAPER_TRADING_PORT
 if LIVE_TRADING:
     TRADING_PORT = LIVE_TRADING_PORT
 
-# these defaults are fine
+# default IP and Client ID
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_CLIENT_ID = 1
 
 # Client for connecting to Interactive Brokers
-class PTLClient(EWrapper, EClient):
+class Client(EWrapper, EClient):
      
     def __init__(self, host, port, client_id):
         EClient.__init__(self, self) 
@@ -174,23 +174,23 @@ def place_order(key):
         client.placeOrder(client.order_id, contract, order)
 
 
-# implement an Interactive Brokers market scanner
-def do_scan(scan_code):
-    scannerSubscription = ScannerSubscription()
-    scannerSubscription.instrument = "STK"
-    scannerSubscription.locationCode = "STK.US.MAJOR"
-    scannerSubscription.scanCode = scan_code
+# # implement an Interactive Brokers market scanner
+# def do_scan(scan_code):
+#     scannerSubscription = ScannerSubscription()
+#     scannerSubscription.instrument = "STK"
+#     scannerSubscription.locationCode = "STK.US.MAJOR"
+#     scannerSubscription.scanCode = scan_code
 
-    tagValues = []
-    tagValues.append(TagValue("optVolumeAbove", "1000"))
-    tagValues.append(TagValue("avgVolumeAbove", "10000"))
+#     tagValues = []
+#     tagValues.append(TagValue("optVolumeAbove", "1000"))
+#     tagValues.append(TagValue("avgVolumeAbove", "10000"))
 
-    client.reqScannerSubscription(7002, scannerSubscription, [], tagValues)
-    time.sleep(1)
+#     client.reqScannerSubscription(7002, scannerSubscription, [], tagValues)
+#     time.sleep(1)
 
-    display_scan()
+#     display_scan()
 
-    client.cancelScannerSubscription(7002)
+#     client.cancelScannerSubscription(7002)
 
 
 #  get new bar data when the user enters a different symbol
@@ -285,10 +285,10 @@ def update_chart():
 
 if __name__ == '__main__':
     # create a client object
-    client = PTLClient(DEFAULT_HOST, TRADING_PORT, DEFAULT_CLIENT_ID)
+    client = Client(DEFAULT_HOST, TRADING_PORT, DEFAULT_CLIENT_ID)
 
     # create chart object, specify display settings
-    chart = Chart(toolbox=True, width=1000, inner_width=0.6, inner_height=1)
+    chart = Chart(toolbox=False, width=1000, inner_width=1.0, inner_height=1)
 
     # hotkey to place a buy order
     chart.hotkey('shift', 'O', place_order)
@@ -310,8 +310,8 @@ if __name__ == '__main__':
     # populate initial chart
     get_bar_data(INITIAL_SYMBOL, '5 mins')
 
-    # run a market scanner
-    do_scan("HOT_BY_VOLUME")
+    # # run a market scanner
+    # do_scan("HOT_BY_VOLUME")
 
     # create a button for taking a screenshot of the chart
     chart.topbar.button('screenshot', 'Screenshot', func=take_screenshot)
