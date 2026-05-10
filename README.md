@@ -4,3 +4,10 @@ This is a fun project I've embarked on where I implement my trading strategy int
 Requirements:
 - Python IDE
 - Interactive Brokers TWS App: (link)
+
+
+
+
+References:
+- https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc
+- https://www.interactivebrokers.com/campus/ibkr-quant-news/interactive-brokers-python-api-native-a-step-by-step-guide/
