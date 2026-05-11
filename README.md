@@ -17,3 +17,8 @@ Requirements:
 References:
 - https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc
 - https://www.interactivebrokers.com/campus/ibkr-quant-news/interactive-brokers-python-api-native-a-step-by-step-guide/
+
+
+
+P.S.
+going to take a break from this project for now and focus on another one for the time being which is a backtesting project. here, I can fine-tune my strategy and backtest it with years of historical data. will work on that for the time being and come back to this project once I've got the python code set up for my strategy implementation.
