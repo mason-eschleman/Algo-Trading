@@ -9,28 +9,38 @@ from ibapi.wrapper import EWrapper
 from ibapi.client import Contract, Order
 from ibapi.tag_value import TagValue
 
-# create a queue for data coming from Interactive Brokers API
-data_queue = queue.Queue()
 
-# a list for keeping track of any indicator lines
-current_lines = []
+## set up some constants that are to be used throughout the connection and trading processes ##
 
-# initial chart symbol to show
-INITIAL_SYMBOL = "AAPL"
-
-# settings for live trading vs. paper trading mode
+# we want to be on a Demo Account unless specified otherwise
 LIVE_TRADING = False
+
+# these are the ports to be used in our connection to the TWS application
 LIVE_TRADING_PORT = 7496
 PAPER_TRADING_PORT = 7497
+
+# set the trading port we're utilizing as the Demo port
+# create if-statement in case we want to implement prompt user for port later down the line
 TRADING_PORT = PAPER_TRADING_PORT
 if LIVE_TRADING:
     TRADING_PORT = LIVE_TRADING_PORT
+
+# initial chart ticker to be displayed
+INITIAL_TICKER = "AAPL"
 
 # default IP and Client ID
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_CLIENT_ID = 1
 
-# Client for connecting to Interactive Brokers
+# create a queue for data coming from IB API
+data_queue = queue.Queue()
+
+# instantiate a list for any drawings that the user might make on the chart
+current_lines = []
+
+
+
+# create the Client per API's requirements
 class Client(EWrapper, EClient):
      
     def __init__(self, host, port, client_id):
@@ -38,24 +48,24 @@ class Client(EWrapper, EClient):
         
         self.connect(host, port, client_id)
 
-        # create a new Thread
+        # API uses threading. Create a new Thread
         thread = Thread(target=self.run)
         thread.start()
 
-
-    def error(self, req_id, code, msg, advancedOrderRejectJson, errorTime=""):
-        if code in [2104, 2106, 2158]:
-            print(msg)
-        else:
-            print('Error {}: {}'.format(code, msg))
-
-
+    # this function handles the placing of orders
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
         self.order_id = orderId
         print(f"next valid id is {self.order_id}")
 
-    # callback when historical data is received from Interactive Brokers
+    # define an error function for traceback purposes
+    def error(self, req_id, code, msg, advancedOrderRejectJson, errorTime=""):
+        if code in [2104, 2106, 2158]:
+            print(msg)
+        else:
+            print('Error {}: {}'.format(code, msg)) 
+
+    # function to acquire bar data of a given ticker for specified timeframe
     def historicalData(self, req_id, bar):
         t = datetime.datetime.fromtimestamp(int(bar.date))
 
@@ -77,58 +87,51 @@ class Client(EWrapper, EClient):
     def historicalDataEnd(self, reqId, start, end):
         print(f"end of data {start} {end}")
             
-        # we can update the chart once all data has been received
+        # update chart once all data has been received
         update_chart()
 
 
-    # callback to log order status, we can put more behavior here if needed
+    # function to check order status - not implementing this yet... reasoning below
     def orderStatus(self, order_id, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice):
-        print(f"order status {order_id} {status} {filled} {remaining} {avgFillPrice}")    
+        print(f"order status {order_id} {status} {filled} {remaining} {avgFillPrice}") 
 
-
-    # callback for when a scan finishes
-    def scannerData(self, req_id, rank, details, distance, benchmark, projection, legsStr):
-        super().scannerData(req_id, rank, details, distance, benchmark, projection, legsStr)
-        print("got scanner data")
-        print(details.contract)
-
-        data = {
-            'secType': details.contract.secType,
-            'secId': details.contract.secId,
-            'exchange': details.contract.primaryExchange,
-            'symbol': details.contract.symbol
-        }
-
-        print(data)
+        '''API documentation for this function: 
         
-        # Put the data into the queue
-        data_queue.put(data)
+        This event is called whenever the status of an order changes. It is also fired after reconnecting to TWS if the client has any open orders.'''   
 
 
-# called by charting library when the
-def get_bar_data(symbol, timeframe):
-    print(f"getting bar data for {symbol} {timeframe}")
+# writing this function in snake_case as it is not an API function
+# this function processes the initial request for retrieving bar data for a given ticker
+def get_bar_data(ticker, timeframe):
 
+    # let user know we have received request and are now fetching data
+    print(f"getting bar data for {ticker} {timeframe}")
+
+    # create an instance of a Contract, as "reqHistoricalData" requires a Contract object
     contract = Contract()
-    contract.symbol = symbol
+    contract.ticker = ticker
     contract.secType = 'STK'
     contract.exchange = 'SMART'
     contract.currency = 'USD'
     what_to_show = 'TRADES'
     
-    #now = datetime.datetime.now().strftime('%Y%m%d %H:%M:%S')
+    # a lightweight-charts function
     chart.spinner(True)
 
+    # call the API's function to acquire historical data for a given ticker 
     client.reqHistoricalData(
         2, contract, '', '30 D', timeframe, what_to_show, True, 2, False, []
     )
 
+    # force a pause to let the previous function call receive and process some of the data before the script continues acquiring data
     time.sleep(1)
        
-    chart.watermark(symbol)
+    # display the ticker's watermark - a lightweight-charts function   
+    chart.watermark(ticker)
 
 
 # handler for the screenshot button
+# the idea here is to be able to capture images of trades for journaling purposes
 def take_screenshot(key):
     img = chart.screenshot()
     t = time.time()
@@ -136,19 +139,19 @@ def take_screenshot(key):
         f.write(img)
 
 
-# handles when the user uses an order hotkey combination
+# function to handle order-placing
 def place_order(key):
-    # get current symbol
-    symbol = chart.topbar['symbol'].value
+    # get current ticker
+    ticker = chart.topbar['ticker'].value
 
-    # build contract object
+    # create a contract object
     contract = Contract()
-    contract.symbol = symbol
+    contract.ticker = ticker
     contract.secType = "STK"
     contract.currency = "USD"
     contract.exchange = "SMART"
     
-    # build order object
+    # create an order object
     order = Order()
     order.orderType = "MKT"
     order.totalQuantity = 1
@@ -174,70 +177,22 @@ def place_order(key):
         client.placeOrder(client.order_id, contract, order)
 
 
-# # implement an Interactive Brokers market scanner
-# def do_scan(scan_code):
-#     scannerSubscription = ScannerSubscription()
-#     scannerSubscription.instrument = "STK"
-#     scannerSubscription.locationCode = "STK.US.MAJOR"
-#     scannerSubscription.scanCode = scan_code
-
-#     tagValues = []
-#     tagValues.append(TagValue("optVolumeAbove", "1000"))
-#     tagValues.append(TagValue("avgVolumeAbove", "10000"))
-
-#     client.reqScannerSubscription(7002, scannerSubscription, [], tagValues)
-#     time.sleep(1)
-
-#     display_scan()
-
-#     client.cancelScannerSubscription(7002)
-
-
-#  get new bar data when the user enters a different symbol
+# get new bar data when the user enters a different ticker
 def on_search(chart, searched_string):
     get_bar_data(searched_string, chart.topbar['timeframe'].value)
-    chart.topbar['symbol'].set(searched_string)
+    chart.topbar['ticker'].set(searched_string)
 
 
 # get new bar data when the user changes timeframes
 def on_timeframe_selection(chart):
     print("selected timeframe")
-    print(chart.topbar['symbol'].value, chart.topbar['timeframe'].value)
-    get_bar_data(chart.topbar['symbol'].value, chart.topbar['timeframe'].value)
+    print(chart.topbar['ticker'].value, chart.topbar['timeframe'].value)
+    get_bar_data(chart.topbar['ticker'].value, chart.topbar['timeframe'].value)
     
 
 # callback for when the user changes the position of the horizontal line
 def on_horizontal_line_move(chart, line):
     print(f'Horizontal line moved to: {line.price}')
-
-
-# called when we want to render scan results
-def display_scan():
-    # function to call when one of the scan results is clicked
-    def on_row_click(row):
-        chart.topbar['symbol'].set(row['symbol'])
-        get_bar_data(row['symbol'], '5 mins')
-
-    # create a table on the UI, pass callback function for when a row is clicked
-    table = chart.create_table(
-                    width=0.4, 
-                    height=0.5,
-                    headings=('symbol', 'value'),
-                    widths=(0.7, 0.3),
-                    alignments=('left', 'center'),
-                    position='left', func=on_row_click
-                )
-
-    # poll queue for any new scan results
-    try:
-        while True:
-            data = data_queue.get_nowait()
-            # create a new row in the table for each scan result
-            table.new_row(data['symbol'], '')
-    except queue.Empty:
-        print("empty queue")
-    finally:
-        print("done")
 
 
 # called when we want to update what is rendered on the chart 
@@ -288,7 +243,7 @@ if __name__ == '__main__':
     client = Client(DEFAULT_HOST, TRADING_PORT, DEFAULT_CLIENT_ID)
 
     # create chart object, specify display settings
-    chart = Chart(toolbox=False, width=1000, inner_width=1.0, inner_height=1)
+    chart = Chart(width=1000, inner_width=1.0, inner_height=1)
 
     # hotkey to place a buy order
     chart.hotkey('shift', 'O', place_order)
@@ -298,91 +253,20 @@ if __name__ == '__main__':
 
     chart.legend(True)
     
-    # set up a function to call when searching for symbol
+    # set up a function to call when searching for ticker
     chart.events.search += on_search
 
     # set up top bar
-    chart.topbar.textbox('symbol', INITIAL_SYMBOL)
+    chart.topbar.textbox('ticker', INITIAL_TICKER)
 
     # give ability to switch between timeframes
     chart.topbar.switcher('timeframe', ('5 mins', '15 mins', '1 hour'), default='5 mins', func=on_timeframe_selection)
 
     # populate initial chart
-    get_bar_data(INITIAL_SYMBOL, '5 mins')
-
-    # # run a market scanner
-    # do_scan("HOT_BY_VOLUME")
+    get_bar_data(INITIAL_TICKER, '5 mins')
 
     # create a button for taking a screenshot of the chart
     chart.topbar.button('screenshot', 'Screenshot', func=take_screenshot)
 
     # show the chart
     chart.show(block=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# import time
-# from ibapi.client import *
-# from ibapi.wrapper import *
-
-
-
-# from threading import Thread
-
-# class IBClient(EWrapper, EClient):
-     
-#     def __init__(self, host, port, client_id):
-#         EClient.__init__(self, self) 
-        
-#         self.connect(host, port, client_id)
-
-#         thread = Thread(target=self.run)
-#         thread.start()
-
-
-#     def historicalData(self, req_id, bar):
-#         print(bar)
-
-
-#     # callback when all historical data has been received
-#     def historicalDataEnd(self, reqId, start, end):
-#         print(f"end of data {start} {end}")
-
-
-#     def error(self, reqId: TickerId, errorTime: int, errorCode: int, 
-#             errorString: str, advancedOrderRejectJson = ""):
-        
-#         print("Error. Id:", reqId, errorTime, "Code:", 
-#             errorCode, "Msg:", errorString, "AdvancedOrderRejectJson:", 
-#             advancedOrderRejectJson)
-
-
-
-# client = IBClient('127.0.0.1', 7497, 1)
-
-# time.sleep(1)
-
-# contract = Contract()
-# contract.symbol = 'SPX'
-# contract.secType = 'IND'
-# contract.exchange = 'CBOE'
-# contract.currency = 'USD'
-# what_to_show = 'TRADES'
-
-# client.reqHistoricalData(
-#     2, contract, '', '30 D', '5 mins', what_to_show, True, 2, False, []
-# )
-
-# time.sleep(1)
