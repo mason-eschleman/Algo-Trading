@@ -1,3 +1,23 @@
+"""
+Application that utilizes Interactive Brokers' API for live data retrieval and TradingView's 
+Lightweight Charts API to visualize and chart the data.
+
+The ultimate goal is to implement my personal trading strategy into this program and bring
+everything together to automating the trading process.
+
+Attributes:
+    LIVE_TRADING (bool): Flag to switch between live and paper trading accounts.
+    LIVE_TRADING_PORT (int): TWS network port dedicated to live accounts.
+    PAPER_TRADING_PORT (int): TWS network port dedicated to paper accounts.
+    TRADING_PORT (int): The default active connection port.
+    INITIAL_TICKER (str): The stock ticker loaded by default on application start.
+    DEFAULT_HOST (str): Local IP address running the TWS application.
+    DEFAULT_CLIENT_ID (int): Unique identifier for this API client session.
+    data_queue (queue.Queue): Threaded queue managing incoming historical bars.
+    current_lines (list): Active visual indicators currently rendered on the chart.
+"""
+
+
 import time, datetime
 import queue
 import pandas as pd
@@ -9,67 +29,98 @@ from ibapi.wrapper import EWrapper
 from ibapi.client import Contract, Order
 from ibapi.tag_value import TagValue
 
-
-## set up some constants that are to be used throughout the connection and trading processes ##
-
-# we want to be on a Demo Account unless specified otherwise
 LIVE_TRADING = False
 
-# these are the ports to be used in our connection to the TWS application
 LIVE_TRADING_PORT = 7496
 PAPER_TRADING_PORT = 7497
 
-# set the trading port we're utilizing as the Demo port
-# create if-statement in case we want to implement prompt user for port later down the line
 TRADING_PORT = PAPER_TRADING_PORT
 if LIVE_TRADING:
     TRADING_PORT = LIVE_TRADING_PORT
 
-# initial chart ticker to be displayed
 INITIAL_TICKER = "AAPL"
 
-# default IP and Client ID
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_CLIENT_ID = 1
 
-# create a queue for data coming from IB API
 data_queue = queue.Queue()
-
-# instantiate a list for any drawings that the user might make on the chart
 current_lines = []
 
 
-
-# create the Client per API's requirements
 class Client(EWrapper, EClient):
-     
+
+    """
+    API client that handles data retrieval from IBKR DB and routes orders as well.
+
+    Class inherits from:
+        EWrapper: receives asynchronous messages from Trader Workstation (TWS).
+        EClient: sends requests to TWS.
+
+    Attributes:
+        order_id (int): the unique ID associated with a specific order.    
+    """
+
     def __init__(self, host, port, client_id):
-        EClient.__init__(self, self) 
+        """
+        Initializes the Client and connects it to the TWS server.
+
+        Args:
+            host (str): Host address of the TWS/IB Gateway instance.
+            port (int): Network port used by TWS for API connections.
+            client_id (int): Unique identifier for this API session.
+
+        """
+
+        EClient.__init__(self) 
         
         self.connect(host, port, client_id)
-
-        # API uses threading. Create a new Thread
+        
         thread = Thread(target=self.run)
         thread.start()
 
-    # this function handles the placing of orders
+    
     def nextValidId(self, orderId: int):
+        """
+        Callback fired when TWS provides next valid order ID. 
+
+        Args:
+            orderID (int): the unique ID associated with a specific order.  
+        """
+
         super().nextValidId(orderId)
         self.order_id = orderId
         print(f"next valid id is {self.order_id}")
 
-    # define an error function for traceback purposes
+    
     def error(self, req_id, code, msg, advancedOrderRejectJson, errorTime=""):
+        """
+        Handle error messages received from TWS.
+
+        Args:
+            req_id (int): Request ID associated with the error.
+            code (int): IBKR error code.
+            msg (str): Human-readable error message.
+            advancedOrderRejectJson (str): Additional order rejection details.
+            errorTime (str): Timestamp of the error (if provided).
+        """
+
         if code in [2104, 2106, 2158]:
             print(msg)
         else:
             print('Error {}: {}'.format(code, msg)) 
 
-    # function to acquire bar data of a given ticker for specified timeframe
+
     def historicalData(self, req_id, bar):
+        """
+        Callback for each historical bar received from TWS.
+
+        Args:
+            req_id (int): Request ID associated with the data.
+            bar (BarData): OHLCV bar object returned by IBKR.
+        """
+        
         t = datetime.datetime.fromtimestamp(int(bar.date))
 
-        # creation bar dictionary for each bar received
         data = {
             'date': t,
             'open': bar.open,
@@ -79,15 +130,21 @@ class Client(EWrapper, EClient):
             'volume': int(bar.volume)
         }
 
-        # Put the data into the queue
         data_queue.put(data)
 
 
-    # callback when all historical data has been received
     def historicalDataEnd(self, reqId, start, end):
+        """
+        Callback fired when all historical data for a request has been received.
+
+        Args:
+            reqId (int): Request ID.
+            start (str): Start timestamp of the data range.
+            end (str): End timestamp of the data range.
+        """
+
         print(f"end of data {start} {end}")
             
-        # update chart once all data has been received
         update_chart()
 
 
@@ -95,19 +152,39 @@ class Client(EWrapper, EClient):
     def orderStatus(self, order_id, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice):
         print(f"order status {order_id} {status} {filled} {remaining} {avgFillPrice}") 
 
-        '''API documentation for this function: 
+        """
+        API documentation for this function: 
+            This event is called whenever the status of an order changes. It is also fired 
+            after reconnecting to TWS if the client has any open orders.
+
+        Args:
+            order_id (int): Order identifier.
+            status (str): Current order status.
+            filled (float): Quantity filled so far.
+            remaining (float): Quantity remaining.
+            avgFillPrice (float): Average fill price.
+            permId (int): Permanent order ID.
+            parentId (int): Parent order ID (if applicable).
+            lastFillPrice (float): Price of the most recent fill.
+            clientId (int): Client ID associated with the order.
+            whyHeld (str): Reason the order is being held.
+            mktCapPrice (float): Market cap price.   
+
+        """
         
-        This event is called whenever the status of an order changes. It is also fired after reconnecting to TWS if the client has any open orders.'''   
 
 
-# writing this function in snake_case as it is not an API function
-# this function processes the initial request for retrieving bar data for a given ticker
 def get_bar_data(ticker, timeframe):
+    """
+    Request historical bar data for a given ticker and timeframe.
 
-    # let user know we have received request and are now fetching data
+    Args:
+        ticker (str): Stock symbol to request data for.
+        timeframe (str): Bar size (e.g., '5 mins', '1 hour').
+    """
+
     print(f"getting bar data for {ticker} {timeframe}")
 
-    # create an instance of a Contract, as "reqHistoricalData" requires a Contract object
     contract = Contract()
     contract.ticker = ticker
     contract.secType = 'STK'
@@ -115,10 +192,8 @@ def get_bar_data(ticker, timeframe):
     contract.currency = 'USD'
     what_to_show = 'TRADES'
     
-    # a lightweight-charts function
     chart.spinner(True)
 
-    # call the API's function to acquire historical data for a given ticker 
     client.reqHistoricalData(
         2, contract, '', '30 D', timeframe, what_to_show, True, 2, False, []
     )
@@ -126,77 +201,108 @@ def get_bar_data(ticker, timeframe):
     # force a pause to let the previous function call receive and process some of the data before the script continues acquiring data
     time.sleep(1)
        
-    # display the ticker's watermark - a lightweight-charts function   
     chart.watermark(ticker)
 
 
-# handler for the screenshot button
-# the idea here is to be able to capture images of trades for journaling purposes
 def take_screenshot(key):
+    """
+    Capture and save a screenshot of the current chart view.
+
+    Args:
+        key (str): Hotkey pressed to trigger the screenshot.
+    """
+    # the idea here is to be able to capture images of trades for journaling purposes
+
     img = chart.screenshot()
     t = time.time()
     with open(f"screenshot-{t}.png", 'wb') as f:
         f.write(img)
 
 
-# function to handle order-placing
 def place_order(key):
-    # get current ticker
+    """
+    Place a market order for the currently displayed ticker.
+
+    Args:
+        key (str): Hotkey pressed ('O' for buy, 'P' for sell).
+    """
     ticker = chart.topbar['ticker'].value
 
-    # create a contract object
     contract = Contract()
     contract.ticker = ticker
     contract.secType = "STK"
     contract.currency = "USD"
     contract.exchange = "SMART"
     
-    # create an order object
     order = Order()
     order.orderType = "MKT"
     order.totalQuantity = 1
-    
-    # get next order id
+
     client.reqIds(-1)
     time.sleep(2)
     
-    # set action to buy or sell depending on key pressed
-    # shift+O is for a buy order
     if key == 'O':
         print("buy order")
         order.action = "BUY"
 
-    # shift+P for a sell order
     if key == 'P':
         print("sell order")
         order.action = "SELL"
 
-    # place the order
     if client.order_id:
         print("got order id, placing buy order")
         client.placeOrder(client.order_id, contract, order)
 
 
-# get new bar data when the user enters a different ticker
 def on_search(chart, searched_string):
+    """
+    Handle ticker search events from the chart UI.
+
+    Args:
+        chart (Chart): Chart instance.
+        searched_string (str): User-entered ticker symbol.
+    """
+
     get_bar_data(searched_string, chart.topbar['timeframe'].value)
     chart.topbar['ticker'].set(searched_string)
 
 
-# get new bar data when the user changes timeframes
 def on_timeframe_selection(chart):
+    """
+    Handle timeframe selection changes from the chart UI.
+
+    Args:
+        chart (Chart): Chart instance.
+    """
+
     print("selected timeframe")
     print(chart.topbar['ticker'].value, chart.topbar['timeframe'].value)
     get_bar_data(chart.topbar['ticker'].value, chart.topbar['timeframe'].value)
     
 
-# callback for when the user changes the position of the horizontal line
 def on_horizontal_line_move(chart, line):
+    """
+    Callback fired when a horizontal line is moved on the chart.
+
+    Args:
+        chart (Chart): Chart instance.
+        line (Line): The moved line object.
+    """
+
     print(f'Horizontal line moved to: {line.price}')
 
 
-# called when we want to update what is rendered on the chart 
 def update_chart():
+    """
+    Process queued historical bar data, update the chart, and render indicators.
+
+    This function:
+        - Drains the data queue
+        - Converts bars to a DataFrame
+        - Updates the chart with OHLCV data
+        - Draws horizontal lines and indicators (e.g., SMA)
+    """
+
     global current_lines
 
     try:
@@ -239,34 +345,25 @@ def update_chart():
 
 
 if __name__ == '__main__':
-    # create a client object
+    
     client = Client(DEFAULT_HOST, TRADING_PORT, DEFAULT_CLIENT_ID)
 
-    # create chart object, specify display settings
     chart = Chart(width=1000, inner_width=1.0, inner_height=1)
 
-    # hotkey to place a buy order
     chart.hotkey('shift', 'O', place_order)
 
-    # hotkey to place a sell order
     chart.hotkey('shift', 'P', place_order)
 
     chart.legend(True)
-    
-    # set up a function to call when searching for ticker
+
     chart.events.search += on_search
 
-    # set up top bar
     chart.topbar.textbox('ticker', INITIAL_TICKER)
 
-    # give ability to switch between timeframes
     chart.topbar.switcher('timeframe', ('5 mins', '15 mins', '1 hour'), default='5 mins', func=on_timeframe_selection)
 
-    # populate initial chart
     get_bar_data(INITIAL_TICKER, '5 mins')
 
-    # create a button for taking a screenshot of the chart
     chart.topbar.button('screenshot', 'Screenshot', func=take_screenshot)
 
-    # show the chart
     chart.show(block=True)
