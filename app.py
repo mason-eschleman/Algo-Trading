@@ -71,7 +71,7 @@ class Client(EWrapper, EClient):
 
         """
 
-        EClient.__init__(self) 
+        EClient.__init__(self, self) 
         
         self.connect(host, port, client_id)
         
