@@ -8,7 +8,7 @@ Here is the goal of this project:
 
 Requirements:
 - Python IDE
-- Interactive Brokers TWS App: (link)
+- Interactive Brokers TWS App: ([link](https://www.interactivebrokers.com/en/trading/download-tws.php?p=stable))
 - APIs for IB and Lightweight Charts are already in the files
 
 
